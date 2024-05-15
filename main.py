@@ -24,40 +24,58 @@ app.add_middleware(
 )
 
 
-@app.on_event("startup")
-@repeat_every(seconds=60 * 10)  # 1 hour
-async def refresh_the_api():
-    import pandas as pd
-    import json
-    global data,page_no,combined_df
-    print("data fetcher running.....")
+@app.get("/trigger_the_data_fecher_for_kpi")
+async def get_data(page: str,paginate: str):
 
+            
+    print("data fetcher running.....")
+            
+    # Initialize an empty DataFrame to store the combined data
+    combined_df = pd.DataFrame()
+            
     # Update the payload for each page
-    url = "https://report.transexpress.lk/api/orders/delivery-success-rate/return-to-client-orders?page=1&per_page=10000"
-        
+    url = "https://report.transexpress.lk/api/orders/delivery-success-rate/return-to-client-orders?page="+page+"&per_page="+paginate
+    
     payload = {}
     headers = {
       'Cookie': 'development_trans_express_session=NaFDGzh5WQCFwiortxA6WEFuBjsAG9GHIQrbKZ8B'
     }
-    
+            
     response = requests.request("GET", url, headers=headers, data=payload)
-    print(response.status_code)
+            
+    # Sample JSON response
+    json_response = response.json()
+    # Extracting 'data' for conversion
+    data = json_response["return_to_client_orders"]['data']
+
+    data_count = len(data)  
     
-    data = pd.json_normalize(response.json()["return_to_client_orders"]['data'])
+    df = pd.json_normalize(data)
+    
+            
+    df['status_name'] = df['status_name'].replace('Partially Delivered', 'Delivered')
+    df['status_name'] = df['status_name'].replace('Received by Client', 'Returned to Client')
+    df = df[['probability','status_name']]
+    df = df[df['probability'].between(0, 100)]
+    
+    print("data collected from page : "+page)
+    #return "done"
+    try:
+        file_path = 'data/data1.csv'  # Replace with your file path
+        source_csv = pd.read_csv(file_path)
+        new_data = df
+        combined_df_final = pd.concat([source_csv,new_data], ignore_index=True)
+    
+        combined_df_final.to_csv("data/data1.csv")
+        print("data added")
+    except:
         
+        df.to_csv("data/data1.csv")
+        print("data created")
 
- 
-    #data = combined_df[combined_df['status.name'].isin(['RETURN TO CLIENT', 'Delivered'])]
-    data['status_name'] = data['status_name'].replace('Partially Delivered', 'Delivered')
-    data['status_name'] = data['status_name'].replace('Received by Client', 'Returned to Client')
-    data = data[['probability','status_name']]
-    data = data[data['probability'].between(0, 100)]
+    print({"page_number":page,"data_count":data_count})
+    return {"page_number":page,"data_count":data_count}
 
-    combined_df = pd.concat([combined_df, data], ignore_index=True)
-
-    page_no = page_no + 1
-    print("data collected....",page_no)
-    return "data collected....",page_no
         
 
 
@@ -66,9 +84,10 @@ async def refresh_the_api():
 
 @app.get("/kpi_results")
 async def kpi_result():
+    file_path = 'data/data1.csv'  # Replace with your file path
+    combined_df = pd.read_csv(file_path)
 
-
-    global combined_df
+    
     status_counts_more_than_80 = combined_df[combined_df['probability'] > 80]['status_name'].value_counts()
     
     status_counts_50_to_80 = combined_df[(combined_df['probability'] >= 50) & (combined_df['probability'] <= 80)]['status_name'].value_counts()
